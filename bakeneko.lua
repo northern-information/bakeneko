@@ -11,8 +11,8 @@ configuration = {
   default_level = 100, -- how loud is the whole thing
   sample_directory = "/home/we/dust/audio/common/808",  -- change to whatever directory you want
 
-  track_1_on = true, -- toggle the drum on and off
-  track_1_level = 100, -- max level of this drum
+  track_1_on = true, -- toggle the sample on and off
+  track_1_level = 100, -- max level of this sample
   track_1_density = 50, -- percentage representing how dense the notes are
   track_1_period  = 1/4, -- periods can be anything (i think)
   track_1_length = 16, -- how many periods before looping back to 1?
