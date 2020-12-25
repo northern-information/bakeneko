@@ -1,117 +1,177 @@
--- k1: exit  e1: bpm
+-- k1: exit  e1: --
 --
 --
---      e2: signature   e3: length
+--      e2: bpm       e3: level
 --
 --    k2: play      k3: reroll
 
 configuration = {
-  default_tempo = 120,
-  -- change to whatever directory you want
-  sample_directory = "/home/we/dust/audio/common/808",
-  -- divisions can be 1, 2, 4, 8, 16 or 0 for "off"
-  drum_1_division  = 8,
-  -- set a file name or "random"
-  drum_1_sample    = "808-BD.wav",
-  drum_2_division  = 8,
-  drum_2_sample    = "random",
-  drum_3_division  = 4,
-  drum_3_sample    = "random",
-  drum_4_division  = 4,
-  drum_4_sample    = "random",
-  drum_5_division  = 1,
-  drum_5_sample    = "random",
-  drum_6_division  = 16,
-  drum_6_sample    = "random",
+  start_playing_on_boot = true, -- start playing as soon as you launch the script?
+  default_bpm = 120, -- change with e2 while running
+  default_level = 100, -- how loud is the whole thing
+  sample_directory = "/home/we/dust/audio/common/808",  -- change to whatever directory you want
+
+  track_1_on = true, -- toggle the drum on and off
+  track_1_level = 100, -- max level of this drum
+  track_1_density = 50, -- percentage representing how dense the notes are
+  track_1_period  = 1/4, -- periods can be anything (i think)
+  track_1_length = 16, -- how many periods before looping back to 1?
+  track_1_sample = "808-BD.wav", -- specifcy a sample name
+  track_1_pattern = "x---x---x---x---", -- draw a pattern with "x" and "-"
+
+  track_2_on = "random", -- ...or spin the wheel with "randoms"
+  track_2_level = "random",
+  track_2_density = "random",
+  track_2_period = "random",
+  track_2_length = "random",
+  track_2_sample = "random",
+  track_2_pattern = "random",
+  
+  track_3_on = true,  
+  track_3_level = 100,
+  track_3_density = 50, 
+  track_3_period = 1/4,
+  track_3_length = 8,
+  track_3_sample = "random",
+  track_3_pattern = "random",
+  
+  track_4_on = true,  
+  track_4_level = 50,
+  track_4_density = 50,
+  track_4_period = 1/8,
+  track_4_length = 16,
+  track_4_sample = "random",
+  track_4_pattern = "random",
+  
+  track_5_on = true,  
+  track_5_level = 50,
+  track_5_density = 50, 
+  track_5_period = 1,
+  track_5_length = "random",
+  track_5_sample = "random",
+  track_5_pattern = "random",
+  
+  track_6_on = true,  
+  track_6_level = 25,
+  track_6_density = 100,
+  track_6_period = 1/8,
+  track_6_length = 4,
+  track_6_sample = "random",
+  track_6_pattern = "random",
 }
 
 function init()
-  -- graphics
+  -- draw
+  screen.aa(0)
   is_screen_dirty = true
   bakeneko_frame = 4
   -- music
-  is_playing = true
-  count = 4
-  quantum = 4
-  signature_key = 4
-  length = 1
-  step = length * count -- start at the end so play starts on 1
-  tempo = configuration.default_tempo
+  is_playing = configuration.start_playing_on_boot
+  bpm = configuration.default_bpm
+  level = configuration.default_level
+  numerator = 0
+  denominator = 4
   transport = 0
-  ppqn = 96
-  patterns = {}
-  -- stuff
-  sound_loop_id = clock.run(sound_loop)
-  graphics_loop_id = clock.run(graphics_loop)
-  screen.aa(0)
+  tracks = {}
+  -- time
+  softclock.init()
+  softclock_loop_id = clock.run(softclock.super_tick)
+  draw_loop_id = clock.run(draw_loop)
+  -- go
   reroll()
-  -- quarter notes
-  -- patterns[1].pattern = { true, false, false, false, true, false, false, false, true, false, false, false, true, false, false, false }
-  -- patterns[2].pattern = { true, false, true, false, true, false, true, false, true, false, true, false, true, false, true, false }
 end
 
+function key(k, z)
+  if z == 0 then return
+  elseif k == 2 then toggle()
+  elseif k == 3 then reroll() end
+  update_screen()
+end
 
--- music
+function enc(e, d)
+      if e == 1 then -- nothing
+  elseif e == 2 then update_bpm(d)
+  elseif e == 3 then update_level(d)
+  end
+  update_screen()
+end
 
+function toggle()
+  is_playing = not is_playing
+end
 
-function sound_loop()
-  while true do
-    clock.sync(1 / ppqn)
-    transport = transport + 1
-    if is_playing then
+function update_level(d)
+  level = util.clamp(level + d, 0, 100)
+end
 
-      if transport % ppqn == 1 then
-        step = wrap(step + 1, 1, length * count)
-        bakeneko_frame = wrap((step % count), 1, 4)
-        play_drums()
-        update_screen()
-      end
+function update_bpm(d)
+  bpm = util.clamp((bpm + d), 20, 300)
+end
 
-    end
-    check_tempo()
+function check_bpm()
+  if bpm ~= params:get("clock_tempo") then
+    params:set("clock_tempo", bpm)
   end
 end
 
+function update_screen()
+  is_screen_dirty = true
+end
 
-function play_drums()
+function cleanup()
+  clock.cancel(softclock_loop_id)
+  clock.cancel(draw_loop_id)
+end
+
+-- sample stuff
+
+function reroll()
+  setup_sampler()
   for i = 1, 6 do
-    if not patterns[i].is_on then return end
-    if patterns[i].pattern[step] then
-      -- print(patterns[i].sample)
-    end
+    tracks[i] = make_track(i)
+    softcut.buffer_clear_region_channel(i, 0, -1)
+    softcut.buffer_read_mono(tracks[i].sample, 0, 0, -1, 1, i)
+    softclock:add(i, tracks[i].period, function(phase) event(i, phase) end)
   end
 end
 
-function make_pattern(i)
-  local this_pattern = {}
-  local this_division = get_drum_division(i)
-  this_pattern["sample"] = get_drum_sample(i)
-  this_pattern["divsion"] = this_division
-  this_pattern["pattern"] = get_random_pattern(this_division)
-  this_pattern["is_on"] = get_drum_division(i) ~= 0
-  return this_pattern
+function event(i, phase)
+  local track = tracks[i]
+  if not track.on then return end
+  track.current_step = wrap(track.current_step + 1, 1, track.length)
+  if track.pattern[track.current_step] then
+    play_sample(i)
+  end
+  update_screen()
 end
 
-function get_drum_sample(i)
-  local sample = configuration["drum_" .. i .. "_sample"]
+function make_track(i)
+  local this_track = {}
+  this_track["on"] = get_on(configuration["track_" .. i .. "_on"])
+  this_track["sample"] = get_track_sample(configuration["track_" .. i .. "_sample"])
+  this_track["period"] = get_period(configuration["track_" .. i .. "_period"])
+  this_track["level"] = get_level(configuration["track_" .. i .. "_level"])
+  this_track["length"] = get_length(configuration["track_" .. i .. "_length"])
+  this_track["density"] = get_density(configuration["track_" .. i .. "_density"])
+  this_track["pattern"] = get_pattern(configuration["track_" .. i .. "_pattern"], this_track.density, this_track.length)
+  this_track["current_step"] = 0
+  return this_track
+end
+
+function get_on(on)
+  if on == "random" then
+    return math.random(0, 1) == 1
+  else
+    return on
+  end
+end
+
+function get_track_sample(sample)
   if sample == "random" then
     return get_random_sample()
   else
     return configuration.sample_directory .. "/" .. sample
   end
-end
-
-function get_drum_division(i)
-  return configuration["drum_" .. i .. "_division"]
-end
-
-function get_random_pattern(division)
-  if division == 0 then return {} end
-  local p = {}
-  for i = 1, length * count do
-    p[i] = math.random(0, 1) == 1
-  end
-  return p
 end
 
 function get_random_sample()
@@ -127,64 +187,157 @@ function get_random_sample()
   return configuration.sample_directory .. "/" .. t[math.random(1, #t)]
 end
 
--- user interactions
-
-
-function key(k, z)
-  if z == 0 then return
-  elseif k == 2 then toggle()
-  elseif k == 3 then reroll() end
-  update_screen()
+function get_period(period)
+  if period == "random" then
+    return math.random(1, 16) / 16
+  else
+    return period
+  end
 end
 
-function toggle()
-  is_playing = not is_playing
+function get_level(level)
+  if level == "random" then
+    return math.random(0, 100)
+  else
+    return level
+  end
 end
 
-function reroll()
+function get_length(length)
+  if length == "random" then
+    return math.random(1, 16)
+  else
+    return length
+  end
+end
+
+function get_density(density)
+  if density == "random" then
+    return math.random(0, 100)
+  else
+    return density
+  end
+end
+
+function get_pattern(pattern, density, length)
+  local p = {}
+  if pattern == "random" then
+    for i = 1, length do
+      p[i] = math.random(0, 100) < density
+    end
+  else
+    for i = 1, #pattern do
+      p[i] = pattern:sub(i, i) ~= '-'
+    end    
+  end
+  return p
+end
+
+function setup_sampler()
+  softcut.reset()
+  softcut.buffer_clear()
+  audio.level_cut(1)
+  audio.level_adc_cut(1)
+  audio.level_eng_cut(1)
   for i = 1, 6 do
-    patterns[i] = make_pattern(i)
+    softcut.level(i, 1)
+    softcut.level_input_cut(1, i, 1.0)
+    softcut.level_input_cut(2, i, 1.0)
+    softcut.pan(i, 0)
+    softcut.play(i, 0)
+    softcut.rate(i, 1)
+    softcut.loop_start(i, 0)
+    softcut.loop_end(i, 36)
+    softcut.loop(i, 0)
+    softcut.rec(i, 0)
+    softcut.fade_time(i, 0.02)
+    softcut.level_slew_time(i, 0.01)
+    softcut.rate_slew_time(i, 0.01)
+    softcut.rec_level(i, 1)
+    softcut.pre_level(i, 1)
+    softcut.position(i, 0)
+    softcut.buffer(i, 1)
+    softcut.enable(i, 1)
+    softcut.filter_dry(i, 1)
+    softcut.filter_fc(i, 0)
+    softcut.filter_lp(i, 0)
+    softcut.filter_bp(i, 0)
+    softcut.filter_rq(i, 0)
   end
 end
 
-function enc(e, d)
-      if e == 1 then update_tempo(d)
-  elseif e == 2 then update_signature(d)
-  elseif e == 3 then update_length(d)
+function play_sample(i)
+  softcut.buffer(i, 2)
+  softcut.play(i, 0)
+  softcut.level(i, (level / 100) * (tracks[i].level / 100))
+  softcut.position(i, 0)
+  softcut.loop_start(i, 0)
+  softcut.loop_end(i, 16)
+  softcut.loop(i, 0)
+  softcut.play(i, 1)
+end
+
+
+-- softclock
+
+
+softclock = {}
+
+function softclock.init()
+  softclock.super_period = 96
+  softclock.transport = 0
+  softclock.song_clocks = {}
+  softclock.sources = {}
+  softclock.sources[1] = "internal"
+  softclock.sources[2] = "midi"
+  softclock.sources[3] = "link"
+  softclock.sources[4] = "crow"
+end
+
+function softclock.super_tick()
+  while true do
+    clock.sync(1 / softclock.super_period)
+    softclock.transport = softclock.transport + 1
+    if is_playing then
+      if softclock.transport % softclock.super_period == 1 then
+        numerator = wrap(numerator + 1, 1, denominator)
+        bakeneko_frame = wrap(bakeneko_frame + 1, 1, 4)
+        update_screen()
+      end
+      for id, song_clock in pairs(softclock.song_clocks) do
+        song_clock.phase_ticks = song_clock.phase_ticks + 1
+        if song_clock.phase_ticks > song_clock.period_ticks then
+          song_clock.phase_ticks = song_clock.phase_ticks - song_clock.period_ticks
+          song_clock.event(song_clock.phase_ticks)
+        end
+      end
+    end
+    check_bpm()
+    check_screen()
   end
-  update_screen()
+end 
+
+function softclock:add(id, period, event)
+  local c = {}
+  c.phase_ticks = 0
+  c.period_ticks = period / (1 / self.super_period) * denominator
+  c.event = event
+  self.song_clocks[id] = c
 end
 
-function update_tempo(d)
-  tempo = util.clamp((tempo + d), 20, 300)
-end
 
-function update_signature(d)
-  signature_key = util.clamp(signature_key + d, 1, 32)
-  quantum = signature_key < 17 and 4 or 8
-  count = util.clamp(wrap(signature_key, 1, 16) + d, 1, 16)
-  reroll()
-end
-
-function update_length(d)
-  length = util.clamp(length + d, 1, 4)
-end
-
--- graphics
+-- draw
 
 
 function redraw()
   screen.clear()
-  draw_patterns()
-  draw_step()
-  draw_grid()
-  draw_time_signature()
+  draw_tracks()
   draw_bpm()
   draw_bakeneko()
   screen.update()
 end
 
-function graphics_loop()
+function draw_loop()
   while true do
     check_screen()
     clock.sleep(1 / 30)
@@ -198,27 +351,25 @@ function check_screen()
   end
 end
 
-function draw_grid()
-  screen.level(15)
-  screen.move(1, 1)   screen.line_rel(128, 0) screen.stroke()
-  screen.move(1, 0)   screen.line_rel(0, 64)  screen.stroke()
-  screen.move(1, 64)  screen.line_rel(128, 0) screen.stroke()
-  screen.move(128, 0) screen.line_rel(0, 64)  screen.stroke()
-  screen.move(36, 1)  screen.line_rel(0, 64)  screen.stroke()
-  screen.move(4, 32)  screen.line_rel(28, 0)  screen.stroke()
-  screen.move(36, 32) screen.line_rel(92, 0)  screen.stroke()
-end
-
-function draw_time_signature()
-  local size = 24
-  local x, y = 16, 26
-  screen.level(15)
-  screen.font_size(size)
-  screen.font_face(3)
-  screen.move(x, y)
-  screen.text_center(count)
-  screen.move(x, y + size + 4)
-  screen.text_center(quantum)
+function draw_tracks()
+  for i = 1, 6 do
+    ii = 0
+    for k, v in pairs(tracks[i].pattern) do
+      local level = v and 5 or 1
+      local current_step = tracks[i].current_step == ii + 1
+      level = (current_step and level == 5) and 15 or level
+      level = tracks[i].on and level or 0
+      screen.level(level)
+      if current_step then
+        screen.rect((i * 7) - 7, (ii * 4) + 1, 5, 3)
+        screen.fill()
+      else
+        screen.rect((i * 7) - 5, 2 + (ii * 4), 2, 2)
+        screen.stroke()
+      end
+      ii = ii + 1
+    end
+  end
 end
 
 function draw_bpm()
@@ -228,41 +379,14 @@ function draw_bpm()
   screen.font_size(size)
   screen.font_face(3)
   screen.move(80, y)
-  screen.text_right(tempo)
+  screen.text_right(bpm)
   screen.font_size(12)
   screen.move(85, y)
-  screen.text("bpm " .. step)
-  local sources = {}
-  sources[1] = "internal"
-  sources[2] = "midi"
-  sources[3] = "link"
-  sources[4] = "crow"
+  screen.text("bpm")
   screen.font_face(0)
   screen.font_size(8)
   screen.move(85, y - 12)
-  screen.text(string.upper(sources[params:get("clock_source")]))
-end
-
-function draw_step()
-  screen.level(15)
-  screen.move(40 + (step * 4) - 1, 62)
-  screen.line_rel(0, -11)
-  screen.stroke()
-end
-
-function draw_patterns()
-  for i = 1, 6 do
-    ii = 0
-    for k, v in pairs(patterns[i].pattern) do
-      local level = v and 1 or 0
-      level = ((step == ii + 1) and level == 1) and 15 or level
-      screen.level(level)
-      screen.move(40 + (ii * 4) + 1, 50 + (i * 2))
-      screen.line_rel(3, 0)
-      screen.stroke()
-      ii = ii + 1
-    end
-  end
+  screen.text(string.upper(softclock.sources[params:get("clock_source")]))
 end
 
 function draw_bakeneko()
@@ -272,14 +396,14 @@ function draw_bakeneko()
   frames[3] = "(>=^,^=)>"
   frames[4] = "(^=^,^=)^"
   screen.level(15)
-  screen.font_size(12)
+  screen.font_size(20)
   screen.font_face(3)
-  screen.move(82, 45)
+  screen.move(82, 54)
   screen.text_center(frames[bakeneko_frame])
 end
 
 
--- stuff
+-- utility functions
 
 
 function wrap(value, min, max)
@@ -301,20 +425,6 @@ function table_contains(t, element)
     end
   end
   return false
-end
-
-function check_tempo()
-  if tempo ~= params:get("clock_tempo") then
-    params:set("clock_tempo", tempo)
-  end
-end
-
-function update_screen()
-  is_screen_dirty = true
-end
-
-function cleanup()
-  clock.cancel(clock_id)
 end
 
 function rerun()
