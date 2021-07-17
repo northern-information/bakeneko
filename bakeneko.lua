@@ -13,16 +13,18 @@ configuration = {
 
   track_1_on = true, -- toggle the sample on and off
   track_1_level = 100, -- max level of this sample
-  track_1_density = 50, -- percentage representing how dense the notes are
-  track_1_period  = 1/4, -- periods can be anything (i think)
+  track_1_density = 50, -- percentage representing how dense the notes are if randomized pattern is used
+  track_1_period  = 1/16, -- periods can be anything (i think)
+  track_1_haunted_fraction = 1/16, -- ghost
   track_1_length = 16, -- how many periods before looping back to 1?
   track_1_sample = "808-BD.wav", -- specifcy a sample name
   track_1_pattern = "x---x---x---x---", -- draw a pattern with "x" and "-"
 
-  track_2_on = "random", -- ...or spin the wheel with "randoms"
+  track_2_on = "random",
   track_2_level = "random",
   track_2_density = "random",
   track_2_period = "random",
+  track_2_haunted_fraction = "random",
   track_2_length = "random",
   track_2_sample = "random",
   track_2_pattern = "random",
@@ -31,6 +33,7 @@ configuration = {
   track_3_level = 100,
   track_3_density = 50, 
   track_3_period = 1/4,
+  track_3_haunted_fraction = 1/2,
   track_3_length = 8,
   track_3_sample = "random",
   track_3_pattern = "random",
@@ -39,6 +42,7 @@ configuration = {
   track_4_level = 50,
   track_4_density = 50,
   track_4_period = 1/8,
+  track_4_haunted_fraction = 1/3,
   track_4_length = 16,
   track_4_sample = "random",
   track_4_pattern = "random",
@@ -47,6 +51,7 @@ configuration = {
   track_5_level = 50,
   track_5_density = 50, 
   track_5_period = 1,
+  track_5_haunted_fraction = 1/4,
   track_5_length = "random",
   track_5_sample = "random",
   track_5_pattern = "random",
@@ -55,10 +60,14 @@ configuration = {
   track_6_level = 25,
   track_6_density = 100,
   track_6_period = 1/8,
+  track_6_haunted_fraction = 1,
   track_6_length = 4,
   track_6_sample = "random",
   track_6_pattern = "random",
 }
+
+engine.name = "Goldeneye"
+lattice = require("lattice")
 
 function init()
   -- draw
@@ -73,13 +82,29 @@ function init()
   denominator = 4
   transport = 0
   tracks = {}
+  clock_sources = { "internal", "midi", "link", "crow" }
   -- time
-  softclock.init()
-  softclock_loop_id = clock.run(softclock.super_tick)
   draw_loop_id = clock.run(draw_loop)
-  -- go
+  bakeneko_lattice = lattice:new()
+  bakeneko_lattice:new_pattern{
+    action = function(t) dance() end,
+    division = 1,
+    enabled = true
+  }
+  bakeneko_lattice:start()
   reroll()
 end
+
+function dance()
+  if is_playing then
+    numerator = util.wrap(numerator + 1, 1, denominator)
+    bakeneko_frame = util.wrap(bakeneko_frame + 1, 1, 4)
+    update_screen()
+    check_bpm()
+    check_screen()
+  end
+end
+
 
 function key(k, z)
   if z == 0 then return
@@ -118,31 +143,29 @@ function update_screen()
   is_screen_dirty = true
 end
 
-function cleanup()
-  clock.cancel(softclock_loop_id)
-  clock.cancel(draw_loop_id)
-end
-
 -- sample stuff
 
 function reroll()
-  setup_sampler()
   for i = 1, 6 do
     tracks[i] = make_track(i)
-    softcut.buffer_clear_region_channel(i, 0, -1)
-    softcut.buffer_read_mono(tracks[i].sample, 0, 0, -1, 1, i)
-    softclock:add(i, tracks[i].period, function(phase) event(i, phase) end)
+    bakeneko_lattice:new_pattern{
+      action = function(t) event(i) end,
+      division = tracks[i].haunted_fraction,
+      enabled = tracks[i].on
+    }
   end
 end
 
-function event(i, phase)
-  local track = tracks[i]
-  if not track.on then return end
-  track.current_step = wrap(track.current_step + 1, 1, track.length)
-  if track.pattern[track.current_step] then
-    play_sample(i)
+function event(i)
+  if is_playing then
+    local track = tracks[i]
+    if not track.on then return end
+    track.current_step = util.wrap(track.current_step + 1, 1, track.length)
+    if track.pattern[track.current_step] then
+      engine.play(track.sample, track.level / 100, 0, 0, 1, 0, 1, 1)
+    end
+    update_screen()
   end
-  update_screen()
 end
 
 function make_track(i)
@@ -150,6 +173,7 @@ function make_track(i)
   this_track["on"] = get_on(configuration["track_" .. i .. "_on"])
   this_track["sample"] = get_track_sample(configuration["track_" .. i .. "_sample"])
   this_track["period"] = get_period(configuration["track_" .. i .. "_period"])
+  this_track["haunted_fraction"] = get_haunted_fraction(configuration["track_" .. i .. "_haunted_fraction"])
   this_track["level"] = get_level(configuration["track_" .. i .. "_level"])
   this_track["length"] = get_length(configuration["track_" .. i .. "_length"])
   this_track["density"] = get_density(configuration["track_" .. i .. "_density"])
@@ -195,6 +219,14 @@ function get_period(period)
   end
 end
 
+function get_haunted_fraction(haunted_fraction)
+  if haunted_fraction == "random" then
+    return math.random(1, 16) / 16
+  else
+    return haunted_fraction
+  end
+end
+
 function get_level(level)
   if level == "random" then
     return math.random(0, 100)
@@ -231,98 +263,6 @@ function get_pattern(pattern, density, length)
     end    
   end
   return p
-end
-
-function setup_sampler()
-  softcut.reset()
-  softcut.buffer_clear()
-  audio.level_cut(1)
-  audio.level_adc_cut(1)
-  audio.level_eng_cut(1)
-  for i = 1, 6 do
-    softcut.level(i, 1)
-    softcut.level_input_cut(1, i, 1.0)
-    softcut.level_input_cut(2, i, 1.0)
-    softcut.pan(i, 0)
-    softcut.play(i, 0)
-    softcut.rate(i, 1)
-    softcut.loop_start(i, 0)
-    softcut.loop_end(i, 36)
-    softcut.loop(i, 0)
-    softcut.rec(i, 0)
-    softcut.fade_time(i, 0.02)
-    softcut.level_slew_time(i, 0.01)
-    softcut.rate_slew_time(i, 0.01)
-    softcut.rec_level(i, 1)
-    softcut.pre_level(i, 1)
-    softcut.position(i, 0)
-    softcut.buffer(i, 1)
-    softcut.enable(i, 1)
-    softcut.filter_dry(i, 1)
-    softcut.filter_fc(i, 0)
-    softcut.filter_lp(i, 0)
-    softcut.filter_bp(i, 0)
-    softcut.filter_rq(i, 0)
-  end
-end
-
-function play_sample(i)
-  softcut.buffer(i, 2)
-  softcut.play(i, 0)
-  softcut.level(i, (level / 100) * (tracks[i].level / 100))
-  softcut.position(i, 0)
-  softcut.loop_start(i, 0)
-  softcut.loop_end(i, 16)
-  softcut.loop(i, 0)
-  softcut.play(i, 1)
-end
-
-
--- softclock
-
-
-softclock = {}
-
-function softclock.init()
-  softclock.super_period = 96
-  softclock.transport = 0
-  softclock.song_clocks = {}
-  softclock.sources = {}
-  softclock.sources[1] = "internal"
-  softclock.sources[2] = "midi"
-  softclock.sources[3] = "link"
-  softclock.sources[4] = "crow"
-end
-
-function softclock.super_tick()
-  while true do
-    clock.sync(1 / softclock.super_period)
-    softclock.transport = softclock.transport + 1
-    if is_playing then
-      if softclock.transport % softclock.super_period == 1 then
-        numerator = wrap(numerator + 1, 1, denominator)
-        bakeneko_frame = wrap(bakeneko_frame + 1, 1, 4)
-        update_screen()
-      end
-      for id, song_clock in pairs(softclock.song_clocks) do
-        song_clock.phase_ticks = song_clock.phase_ticks + 1
-        if song_clock.phase_ticks > song_clock.period_ticks then
-          song_clock.phase_ticks = song_clock.phase_ticks - song_clock.period_ticks
-          song_clock.event(song_clock.phase_ticks)
-        end
-      end
-    end
-    check_bpm()
-    check_screen()
-  end
-end 
-
-function softclock:add(id, period, event)
-  local c = {}
-  c.phase_ticks = 0
-  c.period_ticks = period / (1 / self.super_period) * denominator
-  c.event = event
-  self.song_clocks[id] = c
 end
 
 
@@ -386,7 +326,7 @@ function draw_bpm()
   screen.font_face(0)
   screen.font_size(8)
   screen.move(85, y - 12)
-  screen.text(string.upper(softclock.sources[params:get("clock_source")]))
+  screen.text(string.upper(clock_sources[params:get("clock_source")]))
 end
 
 function draw_bakeneko()
@@ -406,27 +346,10 @@ end
 -- utility functions
 
 
-function wrap(value, min, max)
-  local y = value
-  local d = max - min + 1
-  while y > max do
-    y = y - d
-  end
-  while y < min do
-    y = y + d
-  end
-  return y
-end
-
-function table_contains(t, element)
-  for _, value in pairs(t) do
-    if value == element then
-      return true
-    end
-  end
-  return false
-end
-
 function rerun()
   norns.script.load(norns.state.script)
+end
+
+function r()
+  rerun()
 end
