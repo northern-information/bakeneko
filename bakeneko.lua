@@ -66,7 +66,7 @@ configuration = {
   track_6_pattern = "random",
 }
 
-engine.name = "Goldeneye"
+engine.name = "Goldeneye_ef20e1"
 lattice = require("lattice")
 
 function init()
